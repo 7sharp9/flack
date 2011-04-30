@@ -26,6 +26,10 @@
         let clients = new ConcurrentDictionary<_,_>()
         let mutable disposed = false
         
+        let closeConnection (sock:Socket) =
+            try sock.Shutdown(SocketShutdown.Both)
+            finally sock.Close()
+
         //ensures the listening socket is shutdown on disposal.
         let cleanUp() = 
             if not disposed then
@@ -81,7 +85,7 @@
                     //trigger received
                     (data, sock.RemoteEndPoint :?> IPEndPoint) |> receivedEvent.Trigger
                 
-                //start recieve on accepted client
+                //start receive on accepted client
                 let saea = pool.CheckOut()
                 saea.UserToken <- sock
                 sock.ReceiveAsyncSafe(completed, saea)
@@ -91,18 +95,19 @@
         and processReceive (args:SocketAsyncEventArgs) =
             let sock = args.UserToken :?> Socket
             match args.SocketError with
-            | SocketError.Success ->
+            | SocketError.Success when args.BytesTransferred > 0 ->
                 //process received data, check if data was given on connection.
-                //Todo: gracefull termination
-                if args.BytesTransferred > 0 then
-                    let data = aquiredata args
-                    //trigger received
-                    (data, sock.RemoteEndPoint :?> IPEndPoint) |> receivedEvent.Trigger
+                let data = aquiredata args
+                //trigger received
+                (data, sock.RemoteEndPoint :?> IPEndPoint) |> receivedEvent.Trigger
                 //get on with the next receive
                 let saea = pool.CheckOut()
                 saea.UserToken <- sock
                 sock.ReceiveAsyncSafe( completed, saea)
-            | _ -> sock.RemoteEndPoint :?> IPEndPoint |> disconnectedEvent.Trigger 
+            | _ ->
+                //Something went wrong or the client stopped sending bytes.
+                sock.RemoteEndPoint :?> IPEndPoint |> disconnectedEvent.Trigger 
+                closeConnection sock
 
         and processSend (args:SocketAsyncEventArgs) =
             let sock = args.UserToken :?> Socket
