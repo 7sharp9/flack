@@ -65,8 +65,7 @@
 
         and processAccept (args:SocketAsyncEventArgs) =
             let sock = args.AcceptSocket
-            match args.SocketError with
-            | SocketError.Success -> 
+            if args.SocketError = SocketError.Success then
                 //process newly connected client
                 let endPoint = sock.RemoteEndPoint :?> IPEndPoint
                 let success = clients.TryAdd(endPoint, sock) (*add client to dictionary*)
@@ -89,13 +88,11 @@
                 let saea = pool.CheckOut()
                 saea.UserToken <- sock
                 sock.ReceiveAsyncSafe(completed, saea)
-
-            | _ -> args.SocketError.ToString() |> printfn "socket error on accept: %s"
+            else args.SocketError.ToString() |> printfn "socket error on accept: %s"
 
         and processReceive (args:SocketAsyncEventArgs) =
             let sock = args.UserToken :?> Socket
-            match args.SocketError with
-            | SocketError.Success when args.BytesTransferred > 0 ->
+            if args.SocketError = SocketError.Success && args.BytesTransferred > 0 then
                 //process received data, check if data was given on connection.
                 let data = aquiredata args
                 //trigger received
@@ -104,7 +101,7 @@
                 let saea = pool.CheckOut()
                 saea.UserToken <- sock
                 sock.ReceiveAsyncSafe( completed, saea)
-            | _ ->
+            else
                 //Something went wrong or the client stopped sending bytes.
                 sock.RemoteEndPoint :?> IPEndPoint |> disconnectedEvent.Trigger 
                 closeConnection sock
@@ -138,24 +135,20 @@
         ///Sends the specified message to the client.
         member this.Send(client, msg:byte[]) =
             let success, client = clients.TryGetValue(client)
-            match success with
-            | true -> 
+            if success then
                 let rec loop offset =
-                    match offset with
-                    | offset when offset < msg.Length ->
-                        let remaining = msg.Length - offset
+                    if offset < msg.Length then
                         let tosend =
-                            if remaining > size then size
-                            else remaining
+                            let remaining = msg.Length - offset in
+                            if remaining > size then size else remaining
                         let saea = pool.CheckOut()
                         saea.UserToken <- client
                         Array.blit msg offset saea.Buffer saea.Offset tosend
                         saea.SetBuffer(saea.Offset, tosend)
                         client.SendAsyncSafe(completed, saea)
                         loop (offset + tosend)
-                    | _ -> ()
                 loop 0                    
-            | _ ->  failwith "could not find client %"
+            else failwith "could not find client %"
         
         ///Starts the accepting a incoming connections.
         member this.Start() = 
